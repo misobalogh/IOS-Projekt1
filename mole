@@ -2,23 +2,19 @@
 # xbalog06 Michal Balogh
 # 10.3.2023
 
-
 export POSIXLY_CORRECT=yes
 export LC_ALL=C
 
-
-#-------editors-------
+#-------editors------------------------------------------------------------------------
 EDITOR="nano"
 VISUAL="code"
 DEFAULT="vi"
-#---------------------
 
 
-
-#------functions section------
+#------functions section---------------------------------------------------------------
 
 # prints help message
-print_help () {
+print_help() {
   echo "Usage: mole -h"
   echo "       mole [-g GROUP] FILE"
   echo "       mole [-m] [FILTERS] [DIRECTORY]"
@@ -35,7 +31,7 @@ print_help () {
 }
 
 # opens file in set editor
-open_editor () {
+open_editor() {
   if [ "$EDITOR" ]; then
     "$EDITOR" "$FILE"
   elif [ "$VISUAL" ]; then
@@ -46,17 +42,19 @@ open_editor () {
   exit 1
 }
 
+open_file() {
 
-open_file () {
-  FILE=$1
-  # checks wheter given file is file or dir
-  REALPATH=$(realpath $FILE)
-  
+  REALPATH=$(realpath "$FILE")
+
   if [ "$GROUP" ]; then
-    echo "Nazov grupy $GROUP"
+    sudo groupadd -f "$GROUP"
+    sudo chgrp "$GROUP" "$FILE"
+  else
+    echo "Name of group not provided"
+    exit 1
   fi
 
-
+  # checks wheter given file is file or dir
   if [ ! -f "$FILE" ]; then
     echo "$FILE is not file".
     if [ -d "$FILE" ]; then
@@ -64,45 +62,49 @@ open_file () {
       cd "$REALPATH" || open_editor
     fi
   fi
-  
-  open_editor
+
+  open_editor "$FILE"
 
 }
 
 
-#-----------------------------
 
 
-#------code section------
+#------code section--------------------------------------------------------------------
 
-while getopts ":hg:m" option;
-do  case $option in
-    h)
-      print_help
-      exit;;
-    g)
-      GROUP=$OPTARG
-      open_file "$GROUP"
-      ;;
-    m)
-      echo "Argument m"
-      most_frequent=true
-      ;;
-    *)
-      echo "Invalid option: -$OPTARG" >&2
-      echo "Try 'mole -h' for more information."
+# parse arguments
+while getopts ":hg:m" option; do
+  case $option in
+  h)
+    print_help
+    exit
+    ;;
+  g)
+    GROUP=$OPTARG
+    shift $((OPTIND - 1))
+    if [ $# -eq 0 ]; then
+      echo "No file specified"
       exit 1
-      ;;
+    fi
+    FILE=$1
+    open_file "$FILE" "$GROUP"
+    ;;
+  m)
+    echo "Argument m"
+    most_frequent=true
+    ;;
+  *)
+    echo "Invalid option: -$OPTARG" >&2
+    echo "Try 'mole -h' for more information."
+    exit 1
+    ;;
   esac
 done
 
-shift $((OPTIND-1))
-
 if [ $# -eq 0 ]; then
-  echo "No file specified"
-  exit 1
-fi
+      echo "No file specified"
+      exit 1
+    fi
 
-#open_file "$1"
-
-
+FILE=$1
+open_file "$FILE"
