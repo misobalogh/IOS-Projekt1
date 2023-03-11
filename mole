@@ -6,9 +6,9 @@ export POSIXLY_CORRECT=yes
 export LC_ALL=C
 
 #-------editors------------------------------------------------------------------------
-EDITOR="nano"
-VISUAL="code"
-DEFAULT="vi"
+#EDITOR="nano"
+#VISUAL="code"
+#DEFAULT="vi"
 
 #------functions section---------------------------------------------------------------
 
@@ -36,22 +36,13 @@ open_editor() {
   elif [ "$VISUAL" ]; then
     "$VISUAL" "$FILE"
   else
-    "$DEFAULT" "$FILE"
+    vi "$FILE"
   fi
-  exit 1
 }
 
 open_file() {
 
   REALPATH=$(realpath "$FILE")
-
-  if [ "$GROUP" ]; then
-    sudo groupadd -f "$GROUP"
-    sudo chgrp "$GROUP" "$FILE"
-  else
-    echo "Name of group not provided"
-    exit 1
-  fi
 
   # checks wheter given file is file or dir
   if [ ! -f "$FILE" ]; then
@@ -64,10 +55,15 @@ open_file() {
 
   open_editor "$FILE"
 
+  if [ "$GROUP" ]; then
+    sudo groupadd -f "$GROUP"
+    sudo chgrp "$GROUP" "$FILE"
+  fi
+
 }
 
 change_dir() {
-  if [ ! "$DIR" ]; then
+  if [ -z "$DIR" ]; then
     DIR="./"
   fi
 
@@ -80,55 +76,66 @@ change_dir() {
 
 #------code section--------------------------------------------------------------------
 
-
-DATE=$(date +%Y-%m-%d)
-echo "$DATE"
-
-# parse arguments
-while getopts ":hg:m:" option; do
-  case $option in
-  h)
-    print_help
-    exit
-    ;;
-  g)
-    GROUP=$OPTARG
-    shift $((OPTIND - 1))
-    if [ $# -eq 0 ]; then
-      echo "No file specified"
-      exit 1
-    fi
-    FILE=$1
-    open_file "$FILE" "$GROUP"
-    ;;
-  m)
-    echo "Argument m"
-    DIR=$1
-    change_dir "$DIR"
-    ;;
-  *)
-    echo "Invalid option: -$OPTARG" >&2
-    echo "Try 'mole -h' for more information."
-    exit 1
-    ;;
-  esac
-done
-
-if [ $# -eq 0 ]; then
-  echo "No file specified"
+if [ -z "$(which realpath)" ]; then
+  echo "Error: command realpath not found"
   exit 1
 fi
 
-if [ "$1" = "list" ]; then
-  
-  if [ ! "$2" = "" ]; then
-    cd "$2" || exit 1
-  fi
-  ls -al
+
+if [ -z "$MOLE_RC" ]; then
+  echo "Error: MOLE_RC variable is not set"
+  exit 1
+fi
+
+
+#DATE=$(date +%Y-%m-%d)
+#echo "$DATE"
+
+# parse arguments
+while getopts ":hg:m" option; do
+  case "$option" in
+  h)      print_help; exit 1;;
+  g)      GROUP=$OPTARG;;
+  m)      DIR=$1; change_dir "$DIR";;
+  :)      echo "Error: -$OPTARG requires an argument"; exit 1;;
+  *)      echo "Invalid option: -$OPTARG" >&2
+          echo "Try 'mole -h' for more information."
+          exit 1;;
+  esac
+done
+shift $((OPTIND-1))
+
+
+if [ "$GROUP" ]; then
+  echo "  -Group: $GROUP"
+fi
+
+echo "  -Number of args: $#"
+
+if [ $# -eq 0 ]; then
+  echo "No file specified"
+  echo "Try 'mole -h' for more information."
+  exit 1
 fi
 
 FILE=$1
-open_file "$FILE"
+echo "    -FILE $FILE" 
+
+open_file "$GROUP" "$FILE"
+
+
+
+
+#if [ "$1" = "list" ]; then
+#  
+#  if [ ! "$2" = "" ]; then
+#    cd "$2" || exit 1
+#  fi
+#  ls -al
+#fi
+
+#FILE=$1
+#open_file "$FILE"
 
 
 
