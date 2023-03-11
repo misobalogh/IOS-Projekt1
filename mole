@@ -5,9 +5,12 @@
 export POSIXLY_CORRECT=yes
 export LC_ALL=C
 
+# odstranit
+export MOLE_RC="$HOME"/.config/molerc
+
 #-------editors------------------------------------------------------------------------
-#EDITOR="nano"
-#VISUAL="code"
+EDITOR="nano"
+VISUAL="code"
 #DEFAULT="vi"
 
 #------functions section---------------------------------------------------------------
@@ -83,14 +86,33 @@ fi
 
 
 if [ -z "$MOLE_RC" ]; then
-  echo "Error: MOLE_RC variable is not set"
+  echo "Error: MOLE_RC is not set"
   exit 1
 fi
+
+if [ -f "$MOLE_RC" ]; then
+  #echo "nasiel som $MOLE_RC"
+  echo
+else
+  mkdir -p "$(dirname "$MOLE_RC")"
+  touch "$MOLE_RC"
+fi
+
 
 
 #DATE=$(date +%Y-%m-%d)
 #echo "$DATE"
 
+if [ "$1" = "list" ]; then
+  echo list
+  LIST="TRUE"
+  shift
+fi
+
+
+
+#reset OPTIND
+OPTIND=1
 # parse arguments
 while getopts ":hg:m" option; do
   case "$option" in
@@ -103,6 +125,7 @@ while getopts ":hg:m" option; do
           exit 1;;
   esac
 done
+
 shift $((OPTIND-1))
 
 
@@ -110,21 +133,30 @@ if [ "$GROUP" ]; then
   echo "  -Group: $GROUP"
 fi
 
-echo "  -Number of args: $#"
-
-if [ $# -eq 0 ]; then
-  echo "No file specified"
-  echo "Try 'mole -h' for more information."
-  exit 1
+if [ -z "$LIST" ]; then
+  if [ $# -ne 0 ]; then
+    FILE=$1
+    echo "    -FILE $FILE" 
+    shift
+    open_file "$GROUP" "$FILE"
+  else
+    echo "No file specified"
+    echo "Try 'mole -h' for more information."
+    exit 1
+  fi
 fi
 
-FILE=$1
-echo "    -FILE $FILE" 
+if [ $# -ne 0 ]; then
+  DIRECTORY=$1
+fi 
 
-open_file "$GROUP" "$FILE"
-
-
-
+if [ -z "$DIRECTORY" ]; then
+  DIR="$(realpath .)"
+  echo $DIR
+else
+  DIR=$(realpath "$DIRECTORY")  
+  echo $DIR
+fi
 
 #if [ "$1" = "list" ]; then
 #  
