@@ -14,6 +14,7 @@ VISUAL="code"
 
 #------functions section---------------------------------------------------------------
 
+
 # prints help message
 print_help() {
   echo "Usage: mole -h"
@@ -42,38 +43,68 @@ open_editor() {
   fi
 }
 
+getdir(){
+  if [ -z "$FILE" ]; then
+    DIR=$(basename "$(realpath .)")
+    echo $DIR
+  else
+    DIR=$(basename "$(dirname "$(realpath "$FILE")")")
+  fi
+}
+
+log_mole_rc(){
+  getdir
+  echo "$DATETIME,$USER,$GROUP,$DIR,$FILE" >> "$MOLE_RC"
+} 
+
+list(){
+  SORTED=$(sort -f -t ',' -k5 "$MOLE_RC")
+  LONGESTNAME=$(awk -F ',' '{ if (length($5) > max) max=length($5) } END { print max }' "$MOLE_RC")
+  LONGESTNAME=$((LONGESTNAME+1))
+  echo "$SORTED" | awk -F ',' '{printf "%-'$LONGESTNAME's %s\n", $5":", $3}'
+}
+
+change_dir() {
+  
+  if [ "$FILE" ]; then
+    { cd "$(realpath "$FILE")" || { echo "Could not open $FILE"; exit 1; } }
+  fi
+
+
+  getdir
+  FILTERED_BY_DIR=$(awk -F',' -v dir="$DIR" '$4 == dir {print}' "$MOLE_RC")
+
+  if [ "$MOST_USED" ]; then
+    FILE=$(echo "$FILTERED_BY_DIR" | awk -F',' '{print $5}' | sort | uniq -c | sort -rn | head -n 1 | awk '{print $2}')
+    echo "MOST USED FILE: $FILE"
+  else 
+    LAST_USED=$(echo "$FILTERED_BY_DIR" | tail -n 1 | awk -F ',' '{print $5}')
+    FILE="$LAST_USED"
+  fi
+  
+  open_file 
+}
+
 open_file() {
-
-  REALPATH=$(realpath "$FILE")
-  # checks wheter given file is file or dir
-  #if [ ! -f "$FILE" ]; then
-  #  echo "$FILE is not file".
-  #  exit 1
-  #fi
-
-  open_editor "$FILE"
+  
+  if [ -z "$FILE" ]; then
+    echo ERROR: Could not find file with the specified criteria.
+    exit 1
+  fi
 
   if [ "$GROUP" ]; then
     groupadd -f "$GROUP"
     chgrp "$GROUP" "$FILE"
   else
-    GROUP=$(stat -c %G jefile)
+    GROUP=$(id -gn)
   fi
 
-  echo "$DATETIME,$USER,$GROUP,$FILE" >> "$MOLE_RC"
+  open_editor "$FILE"
+
+  log_mole_rc
+
 }
 
-change_dir() {
-  if [ -z "$DIR" ]; then
-    DIR="./"
-  fi
-
-  if [ -d "$DIR" ]; then
-    echo "$FILE is a directory."
-    cd "$REALPATH" || open_editor
-  fi
-
-}
 
 #------code section--------------------------------------------------------------------
 
@@ -96,13 +127,12 @@ else
   touch "$MOLE_RC"
 fi
 
-DATE=$(date +%Y-%m-%d)
+#DATE=$(date +%Y-%m-%d)
 DATETIME=$(date +%Y-%m-%d\ %H:%M:%S)
 
 #echo "$DATE"
 
 if [ "$1" = "list" ]; then
-  echo list
   LIST="TRUE"
   shift
 fi
@@ -115,7 +145,7 @@ while getopts ":hg:m" option; do
   case "$option" in
   h)      print_help; exit 1;;
   g)      GROUP=$OPTARG;;
-  m)      echo "moznost M";;
+  m)      MOST_USED="TRUE";;
   :)      echo "Error: -$OPTARG requires an argument"; exit 1;;
   *)      echo "Invalid option: -$OPTARG" >&2
           echo "Try 'mole -h' for more information."
@@ -125,61 +155,20 @@ done
 
 shift $((OPTIND-1))
 
-
-if [ "$GROUP" ]; then
-  echo "  -Group: $GROUP"
-fi
-
-if [ -z "$LIST" ]; then
-  if [ $# -ne 0 ]; then
-    FILE=$1
-    echo "    -FILE $FILE" 
-    shift
-    open_file "$GROUP" "$FILE"
-  else
-    echo "No file specified"
-    echo "Try 'mole -h' for more information."
-    exit 1
-  fi
-fi
-
-if [ $# -ne 0 ]; then
-  DIRECTORY=$1
-fi 
-
-
-
 if [ "$LIST" ]; then
-  SORTED=$(sort -t ',' -k4 "$MOLE_RC")
-  LONGESTNAME=$(awk -F ',' '{ if (length($4) > max) max=length($4) } END { print max }' "$MOLE_RC")
-  echo "$SORTED" | awk -F ', ' '{printf "%-'$LONGESTNAME's %s\n", $4":", $3}'
+  list
+  exit 0
 fi
-
-
-
-if [ -z "$DIRECTORY" ]; then
-  DIR="$(realpath .)"
-  echo $DIR
+  
+if [ $# -ne 0 ]; then
+  FILE=$1
+  shift
+  if [ -d "$FILE" ]; then 
+    change_dir
+  else
+    open_file "$GROUP" "$FILE"
+  fi
 else
-  DIR=$(realpath "$DIRECTORY")  
-  echo $DIR
+  echo "No file specified"
+  change_dir
 fi
-
-#if [ "$1" = "list" ]; then
-#  
-#  if [ ! "$2" = "" ]; then
-#    cd "$2" || exit 1
-#  fi
-#  ls -al
-#fi
-
-#FILE=$1
-#open_file "$FILE"
-
-
-
-#if [ -d "$FILE" ]; then
-#     echo "$FILE is a directory."
-#      cd "$REALPATH" || open_editor
-#    fi
-
