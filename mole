@@ -7,11 +7,10 @@ export LC_ALL=C
 
 # odstranit
 export MOLE_RC="$HOME"/.config/molerc
-
-#-------editors------------------------------------------------------------------------
 EDITOR="nano"
 VISUAL="code"
-#DEFAULT="vi"
+
+
 
 #------functions section---------------------------------------------------------------
 
@@ -46,23 +45,22 @@ open_editor() {
 open_file() {
 
   REALPATH=$(realpath "$FILE")
-
   # checks wheter given file is file or dir
-  if [ ! -f "$FILE" ]; then
-    echo "$FILE is not file".
-    if [ -d "$FILE" ]; then
-      echo "$FILE is a directory."
-      cd "$REALPATH" || open_editor
-    fi
-  fi
+  #if [ ! -f "$FILE" ]; then
+  #  echo "$FILE is not file".
+  #  exit 1
+  #fi
 
   open_editor "$FILE"
 
   if [ "$GROUP" ]; then
-    sudo groupadd -f "$GROUP"
-    sudo chgrp "$GROUP" "$FILE"
+    groupadd -f "$GROUP"
+    chgrp "$GROUP" "$FILE"
+  else
+    GROUP=$(stat -c %G jefile)
   fi
 
+  echo "$DATETIME,$USER,$GROUP,$FILE" >> "$MOLE_RC"
 }
 
 change_dir() {
@@ -98,9 +96,9 @@ else
   touch "$MOLE_RC"
 fi
 
+DATE=$(date +%Y-%m-%d)
+DATETIME=$(date +%Y-%m-%d\ %H:%M:%S)
 
-
-#DATE=$(date +%Y-%m-%d)
 #echo "$DATE"
 
 if [ "$1" = "list" ]; then
@@ -110,7 +108,6 @@ if [ "$1" = "list" ]; then
 fi
 
 
-
 #reset OPTIND
 OPTIND=1
 # parse arguments
@@ -118,7 +115,7 @@ while getopts ":hg:m" option; do
   case "$option" in
   h)      print_help; exit 1;;
   g)      GROUP=$OPTARG;;
-  m)      DIR=$1; change_dir "$DIR";;
+  m)      echo "moznost M";;
   :)      echo "Error: -$OPTARG requires an argument"; exit 1;;
   *)      echo "Invalid option: -$OPTARG" >&2
           echo "Try 'mole -h' for more information."
@@ -150,6 +147,16 @@ if [ $# -ne 0 ]; then
   DIRECTORY=$1
 fi 
 
+
+
+if [ "$LIST" ]; then
+  SORTED=$(sort -t ',' -k4 "$MOLE_RC")
+  LONGESTNAME=$(awk -F ',' '{ if (length($4) > max) max=length($4) } END { print max }' "$MOLE_RC")
+  echo "$SORTED" | awk -F ', ' '{printf "%-'$LONGESTNAME's %s\n", $4":", $3}'
+fi
+
+
+
 if [ -z "$DIRECTORY" ]; then
   DIR="$(realpath .)"
   echo $DIR
@@ -170,4 +177,9 @@ fi
 #open_file "$FILE"
 
 
+
+#if [ -d "$FILE" ]; then
+#     echo "$FILE is a directory."
+#      cd "$REALPATH" || open_editor
+#    fi
 
