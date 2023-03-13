@@ -15,7 +15,6 @@ VISUAL="code"
 #------functions section---------------------------------------------------------------
 
 
-# prints help message
 print_help() {
   echo "Usage: mole -h"
   echo "       mole [-g GROUP] FILE"
@@ -32,7 +31,7 @@ print_help() {
   echo "  list: List the files that were opened with mole."
 }
 
-# opens file in set editor
+
 open_editor() {
   if [ "$EDITOR" ]; then
     "$EDITOR" "$FILE"
@@ -56,7 +55,7 @@ log_mole_rc(){
   if [ -z "$GROUP" ];then
     GROUP="-"
   fi
-  echo "$DATETIME;$USER;$GROUP;$DIR;$FILE" >> "$MOLE_RC"
+  echo "$DATETIME;$USER;$GROUP;$DIR;$FILE;$(realpath "$FILE")" >> "$MOLE_RC"
 } 
 
 
@@ -70,7 +69,24 @@ secret_log(){
     mkdir "$SL_PATH"
   fi 
   FILENAME="log_$USER_$DATETIME"
-  echo "$FILTERED" | bzip2 -c > "$SL_PATH"/"$FILENAME".bz2
+ 
+echo "$FILTERED" | awk -F ';' '{print $6 ";" $1}' \
+  | sort -t ';' -k 1 \
+  | awk -F ';' '
+      BEGIN {last_file = ""}
+      {
+        if ($1 != last_file) {
+          if (last_file != "") {
+            print concat
+          }
+          last_file = $1
+          concat = $1 ";"
+        }
+        concat = concat $2 ";"
+      }
+      END {if (last_file != "") print concat}' \
+  | bzip2 -c > "$SL_PATH"/"$FILENAME".bz2
+
 
 }
 
@@ -86,9 +102,9 @@ check_date_format() {
 
 filter_data(){
 
-  
-  FILTERED=$(awk -F';' -v dir="$DIR" '$4 == dir {print}' "$MOLE_RC")
-  
+  if [ "$DIR" ]; then
+    FILTERED=$(awk -F';' -v dir="$DIR" '$4 == dir {print}' "$MOLE_RC")
+  fi
 
   if [ "$GROUP" ] && [ -z "$SECRETLOG" ]; then
     FILTERED=$(echo "$FILTERED" | awk -F';' -v groups="$GROUP" '
@@ -153,12 +169,15 @@ change_dir() {
 open_file() {
   
   if [ -z "$FILE" ]; then
-    echo ERROR: Could not find file with the specified criteria.
+    echo ERROR: Could not find file with the specified criteria
     exit 1
   fi
   
   open_editor "$FILE"
-
+  if [ $? -ne 0 ]; then
+    echo ERROR: Could not open editor
+    exit 1
+  fi
   log_mole_rc
 
 }
