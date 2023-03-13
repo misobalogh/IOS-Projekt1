@@ -61,11 +61,11 @@ log_mole_rc(){
 
 
 secret_log(){
-  SL_PATH="/home/"$USER"/.mole"
+  filter_data
+  SL_PATH="/home/$USER/.mole"
   if [ ! -d "$SL_PATH" ]; then
     mkdir "$SL_PATH"
   fi 
-  filter_data
   FILENAME="log_$USER_$DATETIME"
   echo "$FILTERED" | bzip2 -c > "$SL_PATH"/"$FILENAME".bz2
 
@@ -97,17 +97,16 @@ filter_data(){
     FILTERED=$(awk -F';' -v dirs="$DIRECTORIES" ' 
       BEGIN {split(dirs, arr, ",")}
       {for(i in arr) if($4 == arr[i]) {print; break}}' "$MOLE_RC")
-  fi
-
+  fi  
 
   if [ "$DATE_AFTER" ]; then
     check_date_format "$DATE_AFTER"
-    FILTERED=$(echo "$FILTERED" | awk -F';' -v date="$DATE_AFTER" '$1 > date {print}')
+    FILTERED=$(echo "$FILTERED" | awk -F';' -v date="$DATE_AFTER" '{split($1, dt, "_")} < date {print}')
   fi
 
   if [ "$DATE_BEFORE" ];then
     check_date_format "$DATE_BEFORE"
-    FILTERED=$(echo "$FILTERED" | awk -F';' -v date="$DATE_BEFORE" '$1 < date {print}')  
+    FILTERED=$(echo "$FILTERED" | awk -F';' -v date="$DATE_BEFORE" '$1 > date {print}')  
   fi
  
   if [ -z "$FILTERED" ]; then
@@ -199,7 +198,7 @@ while getopts ":hg:ma:b:" option; do
   h)      print_help; exit 1;;
   g)      GROUP=$OPTARG;;
   m)      MOST_USED="TRUE";;
-  a)      DATE_AFTER=$OPTARG;; #YYYY-MM-DD format
+  a)      DATE_AFTER=$OPTARG;; #YYYY-MM-DD format 
   b)      DATE_BEFORE=$OPTARG;; #YYYY-MM-DD format
   :)      echo "Error: -$OPTARG requires an argument"; exit 1;;
   *)      echo "Invalid option: -$OPTARG" >&2
