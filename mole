@@ -62,6 +62,9 @@ log_mole_rc(){
 
 secret_log(){
   filter_data
+  if [ -z "$FILTERED" ]; then
+    exit 0
+  fi
   SL_PATH="/home/$USER/.mole"
   if [ ! -d "$SL_PATH" ]; then
     mkdir "$SL_PATH"
@@ -83,9 +86,9 @@ check_date_format() {
 
 filter_data(){
 
-  if [ "$DIR" ]; then
-    FILTERED=$(awk -F';' -v dir="$DIR" '$4 == dir {print}' "$MOLE_RC")
-  fi
+  
+  FILTERED=$(awk -F';' -v dir="$DIR" '$4 == dir {print}' "$MOLE_RC")
+  
 
   if [ "$GROUP" ] && [ -z "$SECRETLOG" ]; then
     FILTERED=$(echo "$FILTERED" | awk -F';' -v groups="$GROUP" '
@@ -93,23 +96,27 @@ filter_data(){
       {for(i in arr) if($3 == arr[i]) {print; break}}')
   fi
 
-  if [ "$SECRETLOG" ] && [ "$DIRECTORIES" ]; then
-    FILTERED=$(awk -F';' -v dirs="$DIRECTORIES" ' 
-      BEGIN {split(dirs, arr, ",")}
-      {for(i in arr) if($4 == arr[i]) {print; break}}' "$MOLE_RC")
+  if [ "$SECRETLOG" ];then
+    if [ "$DIRECTORIES" ]; then
+      FILTERED=$(awk -F';' -v dirs="$DIRECTORIES" ' 
+        BEGIN {split(dirs, arr, ",")}
+        {for(i in arr) if($4 == arr[i]) {print; break}}' "$MOLE_RC")
+    else
+      FILTERED=$(awk -F';' '{ print }' "$MOLE_RC")
+    fi
   fi  
 
   if [ "$DATE_AFTER" ]; then
     check_date_format "$DATE_AFTER"
-    FILTERED=$(echo "$FILTERED" | awk -F';' -v date="$DATE_AFTER" '{split($1, dt, "_")} < date {print}')
+    FILTERED=$(echo "$FILTERED" | awk -F';' -v date="$DATE_AFTER" '{split($1, dt, "_"); if (dt[1] < date) print}')
   fi
 
   if [ "$DATE_BEFORE" ];then
     check_date_format "$DATE_BEFORE"
-    FILTERED=$(echo "$FILTERED" | awk -F';' -v date="$DATE_BEFORE" '$1 > date {print}')  
+    FILTERED=$(echo "$FILTERED" | awk -F';' -v date="$DATE_BEFORE" '{split($1, dt, "_"); if (dt[1] > date) print}') 
   fi
  
-  if [ -z "$FILTERED" ]; then
+  if [ -z "$FILTERED" ] && [ -z "$SECRETLOG" ]; then
     echo "No files edited through mole were found with specified criteria"
     exit 0
   fi
@@ -195,7 +202,7 @@ OPTIND=1
 # parse arguments
 while getopts ":hg:ma:b:" option; do
   case "$option" in
-  h)      print_help; exit 1;;
+  h)      print_help; exit 0;;
   g)      GROUP=$OPTARG;;
   m)      MOST_USED="TRUE";;
   a)      DATE_AFTER=$OPTARG;; #YYYY-MM-DD format 
