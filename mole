@@ -27,8 +27,8 @@ print_help() {
   echo "  FILE: Open the specified file."
   echo "  -g GROUP: Assign the opened file to the specified group."
   echo "  -m: Select the most frequently opened file instead of the last opened one."
-  echo "  FILTERS: Apply filters to the list of files."
-  echo "  DIRECTORY: Select the directory to search for files. If not specified, the current directory will be used."
+  echo "  FILTERS: Apply filters to the list"
+  echo "  DIRECTORY: Select the directory to search in. If not specified, current directory will be used."
   echo "  list: List the files that were opened with mole."
 }
 
@@ -53,8 +53,24 @@ getdir(){
 
 log_mole_rc(){
   getdir
-  echo "$DATETIME,$USER,$GROUP,$DIR,$FILE" >> "$MOLE_RC"
+  if [ -z "$GROUP" ];then
+    GROUP="-"
+  fi
+  echo "$DATETIME;$USER;$GROUP;$DIR;$FILE" >> "$MOLE_RC"
 } 
+
+
+secret_log(){
+  SL_PATH="/home/"$USER"/.mole"
+  if [ ! -d "$SL_PATH" ]; then
+    mkdir "$SL_PATH"
+  fi 
+  filter_data
+  FILENAME="log_$USER_$DATETIME"
+  echo "$FILTERED" | bzip2 -c > "$SL_PATH"/"$FILENAME".bz2
+
+}
+
 
 check_date_format() {
   if ! echo "$1" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
@@ -64,32 +80,48 @@ check_date_format() {
   fi
 }
 
-list(){
-  FILTERED=$(awk -F',' -v dir="$DIR" '$4 == dir {print}' "$MOLE_RC")
 
-  if [ "$GROUP" ]; then
-    FILTERED=$(echo "$FILTERED" | awk -F',' -v dir="$GROUP" '$3 == dir {print}')
+filter_data(){
+
+  if [ "$DIR" ]; then
+    FILTERED=$(awk -F';' -v dir="$DIR" '$4 == dir {print}' "$MOLE_RC")
   fi
+
+  if [ "$GROUP" ] && [ -z "$SECRETLOG" ]; then
+    FILTERED=$(echo "$FILTERED" | awk -F';' -v groups="$GROUP" '
+      BEGIN {split(groups, arr, ",")}
+      {for(i in arr) if($3 == arr[i]) {print; break}}')
+  fi
+
+  if [ "$SECRETLOG" ] && [ "$DIRECTORIES" ]; then
+    FILTERED=$(awk -F';' -v dirs="$DIRECTORIES" ' 
+      BEGIN {split(dirs, arr, ",")}
+      {for(i in arr) if($4 == arr[i]) {print; break}}' "$MOLE_RC")
+  fi
+
 
   if [ "$DATE_AFTER" ]; then
     check_date_format "$DATE_AFTER"
-    FILTERED=$(echo "$FILTERED" | awk -F',' -v date="$DATE_AFTER" '$1 > date {print}')
+    FILTERED=$(echo "$FILTERED" | awk -F';' -v date="$DATE_AFTER" '$1 > date {print}')
   fi
 
   if [ "$DATE_BEFORE" ];then
     check_date_format "$DATE_BEFORE"
-    FILTERED=$(echo "$FILTERED" | awk -F',' -v date="$DATE_BEFORE" '$1 < date {print}')  
+    FILTERED=$(echo "$FILTERED" | awk -F';' -v date="$DATE_BEFORE" '$1 < date {print}')  
   fi
  
   if [ -z "$FILTERED" ]; then
     echo "No files edited through mole were found with specified criteria"
     exit 0
   fi
+}
 
-  SORTED=$(echo "$FILTERED" | sort -f -t ',' -k5 -k3)
-  LONGESTNAME=$(awk -F ',' '{ if (length($5) > max) max=length($5) } END { print max }' "$MOLE_RC")
+list(){
+  filter_data
+  SORTED=$(echo "$FILTERED" | sort -f -t ';' -k5 -k3)
+  LONGESTNAME=$(echo "$FILTERED" | awk -F ';' '{ if (length($5) > max) max=length($5) } END { print max }')
   LONGESTNAME=$((LONGESTNAME+1))
-  echo "$SORTED" | awk -F ',' '{printf "%-'$LONGESTNAME's %s\n", $5":", $3}'
+  echo "$SORTED" | awk -F ';' '{printf "%-'$LONGESTNAME's %s\n", $5":", $3}'
 }
 
 change_dir() {
@@ -98,14 +130,14 @@ change_dir() {
     { cd "$(realpath "$FILE")" || { echo "Could not open $FILE"; exit 1; } }
   fi
 
-
   getdir
-  FILTERED=$(awk -F',' -v dir="$DIR" '$4 == dir {print}' "$MOLE_RC")
+
+  filter_data
 
   if [ "$MOST_USED" ]; then
-    FILE=$(echo "$FILTERED" | awk -F',' '{print $5}' | sort | uniq -c | sort -rn | head -n 1 | awk '{print $2}')
+    FILE=$(echo "$FILTERED" | awk -F';' '{print $5}' | sort | uniq -c | sort -rn | head -n 1 | awk '{print $2}')
   else 
-    LAST_USED=$(echo "$FILTERED" | tail -n 1 | awk -F ',' '{print $5}')
+    LAST_USED=$(echo "$FILTERED" | tail -n 1 | awk -F ';' '{print $5}')
     FILE="$LAST_USED"
   fi
   
@@ -118,17 +150,7 @@ open_file() {
     echo ERROR: Could not find file with the specified criteria.
     exit 1
   fi
-
-  if [ "$GROUP" ]; then
-    groupadd -f "$GROUP"
-    chgrp "$GROUP" "$FILE"
-  else
-    GROUP=$(id -gn)
-    if [ -z "$GROUP" ]; then
-      GROUP="-"
-    fi
-  fi
-
+  
   open_editor "$FILE"
 
   log_mole_rc
@@ -155,11 +177,16 @@ if [ ! -f "$MOLE_RC" ]; then
 fi
 
 #DATE=$(date +%Y-%m-%d)
-DATETIME=$(date +%Y-%m-%d\ %H:%M:%S)
+DATETIME=$(date +%Y-%m-%d_%H-%M-%S)
 
 
 if [ "$1" = "list" ]; then
   LIST="TRUE"
+  shift
+fi
+
+if [ "$1" = "secret-log" ]; then
+  SECRETLOG="TRUE"
   shift
 fi
 
@@ -193,6 +220,15 @@ if [ "$LIST" ]; then
   list
   exit 0
 fi
+
+if [ "$SECRETLOG" ]; then
+  if [ $# -ne 0 ]; then
+    DIRECTORIES=$1
+  fi
+  secret_log
+  exit 0
+fi
+
   
 if [ $# -ne 0 ]; then
   FILE=$1
@@ -203,6 +239,7 @@ if [ $# -ne 0 ]; then
     open_file "$GROUP" "$FILE"
   fi
 else
-  echo "No file specified"
   change_dir
 fi
+
+exit 0
