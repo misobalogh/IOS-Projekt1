@@ -10,7 +10,7 @@ export LC_ALL=C
 #EDITOR="nano"
 #VISUAL="code"
 
-DATETIME=$($BINL/testdate)
+DATETIME=$($BINL/testdate +%Y-%m-%d_%H-%M-%S)
 #DATETIME=$(date +%Y-%m-%d_%H-%M-%S)
 
 
@@ -55,6 +55,41 @@ getdir(){
 
 
 
+list(){
+
+  filter_data
+
+  if [ -z "$FILTERED" ]; then
+    exit 1
+  fi
+
+  FILTERED=$(echo "$FILTERED" | awk -v dir="$DIR" -F ';' '{sub(/\/[^\/]*$/, "", $6); if ($6 == dir) print }')
+  
+  SORTED=$(echo "$FILTERED" | sort -dfu -k5 -k3)
+
+  SORTED=$(echo "$SORTED" | awk '{ split($0, cols, " "); 
+    if (cols[5] == prev_col5) {
+      if (prev_col3 == "-"){prev_col3 = cols[3]} 
+      else {prev_col3 = prev_col3 "," cols[3]}
+    } 
+    else {
+      if (NR > 1) { print prev_col1, prev_col2, prev_col3, prev_col4, prev_col5 }
+      prev_col1 = cols[1]
+      prev_col2 = cols[2]
+      prev_col3 = cols[3]
+      prev_col4 = cols[4]
+      prev_col5 = cols[5]
+      }
+    }
+    END { print prev_col1, prev_col2, prev_col3, prev_col4, prev_col5 }')
+
+  LONGESTNAME=$(echo "$FILTERED" | awk -F ' ' '{ if (length($5) > max) max=length($5) } END { print max }')
+  LONGESTNAME=$((LONGESTNAME+1))
+  echo "$SORTED" | awk -F ' ' '{printf "%-'$LONGESTNAME's %s\n", $5":", $3}'
+
+  exit 0
+}
+
 
 log_mole_rc(){
   getdir
@@ -66,6 +101,7 @@ log_mole_rc(){
 } 
 
 
+
 secret_log(){
   filter_data
   if [ -z "$FILTERED" ]; then
@@ -75,10 +111,10 @@ secret_log(){
   if [ ! -d "$SL_PATH" ]; then
     mkdir "$SL_PATH"
   fi 
-  FILENAME="log_$USER_$DATETIME"
+  FILENAME="log_""$USER"_"$DATETIME"
  
-echo "$FILTERED" | awk -F ';' '{print $6 ";" $1}' \
-  | sort -t ';' -k 1 \
+  echo "$FILTERED" | awk -F ';' '{print $6 ";" $1}' \
+  | sort -dfu \
   | awk -F ';' '
       BEGIN {last_file = ""}
       {
@@ -92,6 +128,7 @@ echo "$FILTERED" | awk -F ';' '{print $6 ";" $1}' \
         date = date $2 ";"
       }
       END {if (last_file != "") print date}' \
+  | sed 's/;$//' \
   | bzip2 -c > "$SL_PATH"/"$FILENAME".bz2
 
 
@@ -108,75 +145,41 @@ check_date_format() {
 
 
 filter_data(){
-  getdir
-  if [ "$DIR" ]; then
-    FILTERED=$(awk -F';' -v dir="$DIR" '$4 == dir {print}' "$MOLE_RC")
-  fi
+  
+  FILTERED=$(cat "$MOLE_RC")
 
   if [ "$GROUP" ] && [ -z "$SECRETLOG" ]; then
     FILTERED=$(echo "$FILTERED" | awk -F';' -v groups="$GROUP" '
       BEGIN {split(groups, arr, ",")}
       {for(i in arr) if($3 == arr[i]) {print; break}}')
   fi
+  
+  if [ "$SECRETLOG" ] && [ "$DIRECTORIES" ]; then
 
-  if [ "$SECRETLOG" ];then
-    if [ "$DIRECTORIES" ]; then
-      FILTERED=$(awk -F';' -v dirs="$DIRECTORIES" ' 
-        BEGIN {split(dirs, arr, ",")}
-        {for(i in arr) if($4 == arr[i]) {print; break}}' "$MOLE_RC")
-    else
-      FILTERED=$(awk -F';' '{ print }' "$MOLE_RC")
-    fi
-  fi  
+      
+    FILTERED=$(echo "$FILTERED" | awk -F';' -v dirs="$DIRECTORIES" '
+    BEGIN {split(dirs, arr, " ")}
+    {for (i=1; i<=NF; i++) {sub(/\/[^\/]*$/, "", $i)}}
+    {for (i in arr) {for (j=1; j<=NF; j++) {if ($j == arr[i]) {print; break}}}}')
+
+
+  fi
+  #echo "$FILTERED"
+
 
   if [ "$DATE_AFTER" ]; then
     check_date_format "$DATE_AFTER"
-    FILTERED=$(echo "$FILTERED" | awk -F';' -v date="$DATE_AFTER" '{split($1, dt, "_"); if (dt[1] < date) print}')
+    FILTERED=$(echo "$FILTERED" | awk -F';' -v date="$DATE_AFTER" '{split($1, dt, "_"); if (dt[1] > date) print}')
+
   fi
 
-  if [ "$DATE_BEFORE" ];then
+  if [ "$DATE_BEFORE" ]; then
     check_date_format "$DATE_BEFORE"
-    FILTERED=$(echo "$FILTERED" | awk -F';' -v date="$DATE_BEFORE" '{split($1, dt, "_"); if (dt[1] > date) print}') 
-  fi
- 
-  #if [ -z "$FILTERED" ] && [ -z "$SECRETLOG" ]; then
-  #  echo "No files edited through mole were found with specified criteria"
-  #  exit 1
-  #fi
-}
-
-list(){
-  filter_data
-  SORTED=$(echo "$FILTERED" | sort -f -t ';' -k5 -k3)
-  LONGESTNAME=$(echo "$FILTERED" | awk -F ';' '{ if (length($5) > max) max=length($5) } END { print max }')
-  LONGESTNAME=$((LONGESTNAME+1))
-  echo "$SORTED" | awk -F ';' '{printf "%-'$LONGESTNAME's %s\n", $5":", $3}'
-}
-
-change_dir() {
-
-  DIR=$(dirname $(awk -v file="$(basename $FILE)" -F';' '$5 == file { print $6 }' "$MOLE_RC" | tail -1))
-  echo $DIR
-  if [ -z "$DIR" ]; then
-    echo "ERROR: "
-    exit 1
+    FILTERED=$(echo "$FILTERED" | awk -F';' -v date="$DATE_BEFORE" '{split($1, dt, "_"); if (dt[1] < date) print}')
   fi
 
-  cd "$DIR" ||{ 
-    echo "Could not open directory $DIR";
-    exit 1;} 
-  #getdir
-  filter_data
-  
-
-  if [ "$MOST_USED" ]; then
-    FILE=$(echo "$FILTERED" | awk -F';' '{print $5}' | sort | uniq -c | sort -rn | head -n 1 | awk '{print $2}')
-  else 
-    LAST_USED=$(echo "$FILTERED" | tail -n 1 | awk -F ';' '{print $5}')
-    FILE="$LAST_USED"
-  fi
-  open_file 
 }
+
 
 open_file() {
   
@@ -227,10 +230,6 @@ if [ "$1" = "secret-log" ]; then
   shift
 fi
 
-
-#reset OPTIND
-OPTIND=1
-# parse arguments
 while getopts ":hg:ma:b:" option; do
   case "$option" in
   h)      print_help; exit 0;;
@@ -249,23 +248,26 @@ shift $((OPTIND-1))
 
 
 if [ "$LIST" ]; then
-  if [ $# -ne 0 ]; then
-    DIR=$1
+  if [ $# -eq 0 ]; then
+    DIR=$(realpath .)
   else 
-    getdir
+    DIR=$1
   fi
   list
   exit 0
 fi
 
 if [ "$SECRETLOG" ]; then
-  if [ $# -ne 0 ]; then
-    DIRECTORIES=$1
-  fi
+  while [ $# -ne 0 ]; do
+    DIRECTORIES="$DIRECTORIES $1"
+    shift
+  done 
   secret_log
   exit 0
 fi
 
+
+filter_data
 
 if [ $# -eq 0 ]; then
   current_dir=$(realpath .)  
@@ -273,7 +275,8 @@ else
   ARGUMENT=$(realpath $1)
   if [ -d "$ARGUMENT" ]; then
     current_dir=$ARGUMENT
-  else
+  else 
+    # otvori subor specifikovany argumentom, pripadne aj so zadanou skupinou ziskanou z filter_data
     FILE=$ARGUMENT
     open_file
     exit 0
@@ -285,7 +288,7 @@ fi
 # otvori v editore posledny editovany subor v tomto adresari
 # regulerny vyraz sub(/\/[^\/]*$/, "", $6) odstrani vsetko po poslednom '/' -> ziska cestu k suboru
 # ziskanu cestu porovna s aktualnym adresarom, ak je rovnaky -> otvori subor
-FILE=$(awk -v current_dir="$current_dir" -F ';' '{original=$6; sub(/\/[^\/]*$/, "", $6); if ($6 == current_dir) {last_match=original}} END {print last_match}' "$MOLE_RC")
+FILE=$(echo "$FILTERED" | awk -v current_dir="$current_dir" -F ';' '{rpath=$6; sub(/\/[^\/]*$/, "", $6); if ($6 == current_dir) {last_match=rpath}} END {print last_match}' )
 
 # ak sa nenajde ziadna zhoda, ukonci skript s errorom
 if [ -z "$FILE" ]; then
@@ -297,3 +300,5 @@ fi
 open_file
 
 exit 0
+
+
