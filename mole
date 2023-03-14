@@ -112,18 +112,16 @@ secret_log(){
     mkdir "$SL_PATH"
   fi 
   FILENAME="log_""$USER"_"$DATETIME"
- 
   echo "$FILTERED" | awk -F ';' '{print $6 ";" $1}' \
-  | sort -dfu \
+  | sort -df \
   | awk -F ';' '
-      BEGIN {last_file = ""}
-      {
-        if ($1 != last_file) {
-          if (last_file != "") {
-            print date
-          }
-          last_file = $1
-          date = $1 ";"
+    BEGIN {last_file = ""}
+    { if ($1 != last_file) {
+        if (last_file != "") {
+          print date
+        }
+        last_file = $1
+        date = $1 ";"
         }
         date = date $2 ";"
       }
@@ -147,25 +145,32 @@ check_date_format() {
 filter_data(){
   
   FILTERED=$(cat "$MOLE_RC")
-
   if [ "$GROUP" ] && [ -z "$SECRETLOG" ]; then
     FILTERED=$(echo "$FILTERED" | awk -F';' -v groups="$GROUP" '
       BEGIN {split(groups, arr, ",")}
       {for(i in arr) if($3 == arr[i]) {print; break}}')
   fi
-  
-  if [ "$SECRETLOG" ] && [ "$DIRECTORIES" ]; then
-
-      
-    FILTERED=$(echo "$FILTERED" | awk -F';' -v dirs="$DIRECTORIES" '
+if [ "$SECRETLOG" ] && [ "$DIRECTORIES" ]; then
+  FILTERED=$(echo "$FILTERED" | awk -F';' -v OFS=';' -v dirs="$DIRECTORIES" '
     BEGIN {split(dirs, arr, " ")}
-    {for (i=1; i<=NF; i++) {sub(/\/[^\/]*$/, "", $i)}}
-    {for (i in arr) {for (j=1; j<=NF; j++) {if ($j == arr[i]) {print; break}}}}')
-
-
-  fi
-  #echo "$FILTERED"
-
+    {
+      rpath=$6
+      for (i=1; i<=NF; i++) {
+        sub(/\/[^\/]*$/, "", $i)
+      }
+    }
+    {
+      for (i in arr) {
+        for (j=1; j<=NF; j++) {
+          if ($j == arr[i]) {
+            print $1,$2,$3,$4,$5,rpath
+            break
+          }
+        }
+      }
+    }'
+  )
+fi
 
   if [ "$DATE_AFTER" ]; then
     check_date_format "$DATE_AFTER"
