@@ -73,9 +73,13 @@ list(){
   # ak sa zhoduju, ulozi ho do filtrovanych dat
   FILTERED=$(echo "$FILTERED" | awk -v dir="$DIR" -F ';' '{sub(/\/[^\/]*$/, "", $6); if ($6 == dir || $6"/" == dir) print }')
 
-  # zoradi najdene subory podla stlpca $5 (nazov suboru) a potom podla stlpca $3 (skupina), zoradi ich podla abecedy
+  # zoradi najdene subory podla stlpca $5 (nazov suboru) a potom podla stlpca $3 (skupina), zoradi ich lexikograficky 
+  # -dfu zoradenie podla abecedy, case-insensitive, unique
   SORTED=$(echo "$FILTERED" | sort -dfu -k5 -k3)
 
+  # if - ak nebola zadana grupa pri jednom otvoreni, ale pri druhom ano, odstrani '-' a nahradi ho skupinou
+  # else - pospaja rovnake subory s roznymi skupinami do jedenho a skupiny oddeli ciarkami
+  # vykonava sa dovtedy, dokym nie je na prvom riadku (NR > 1), ak ano, do SORTED este ulozi prvy riadok
   SORTED=$(echo "$SORTED" | awk '{ split($0, cols, " "); 
     if (cols[5] == prev_col5) {
       if (prev_col3 == "-"){prev_col3 = cols[3]} 
@@ -92,14 +96,17 @@ list(){
     }
     END { print prev_col1, prev_col2, prev_col3, prev_col4, prev_col5 }')
 
+  # najde najdlhsi nazov suboru kvoli zarovnaniu skupin
   LONGESTNAME=$(echo "$FILTERED" | awk -F ' ' '{ if (length($5) > max) max=length($5) } END { print max }')
-  LONGESTNAME=$((LONGESTNAME+1))
+  LONGESTNAME=$((LONGESTNAME+1)) # +1 minimalna medzera
+  # vypisanie vystupu aj s odsadenim skupin
   echo "$SORTED" | awk -F ' ' '{printf "%-'$LONGESTNAME's %s\n", $5":", $3}'
 
   exit 0
 }
 
-
+# ziska nazov adresaru s ktorym chceme pracovat
+# ak nebol zadany subor (FILE), ziska nazov aktualneho adresara
 getdir(){
   if [ -z "$FILE" ]; then
     DIR=$(basename "$(realpath .)")
@@ -108,7 +115,9 @@ getdir(){
   fi
 }
 
-
+# zapis dat do suboru daneho premennou MOLE_RC
+# data su oddelene bodkociarkou ';'
+# ak nebola zadana grupa, zapise namiesto toho pomlcku '-'
 log_mole_rc(){ 
   getdir
   if [ -z "$GROUP" ];then
@@ -121,15 +130,25 @@ log_mole_rc(){
 
 
 secret_log(){
+  # vyfiltruje data
   filter_data
+  # ak filtrom nevyhovuju ziadne subory, nevypise nic a ukonci program
   if [ -z "$FILTERED" ]; then
     exit 0
   fi
+  # definuje cestu k adresaru secret-logu
   SL_PATH="/home/$USER/.mole"
+  # ak neexistuje, vytvori ju
   if [ ! -d "$SL_PATH" ]; then
     mkdir "$SL_PATH"
   fi 
+  # definujte nazov suboru - log_uzivatel_datumcas
   FILENAME="log_""$USER"_"$DATETIME"
+  # pomocou awk vyberie a preusporiada stlpce filtrovanych dat a potom ich zoradi (abecedne, case-insensitive)
+  # premenna "last_file" sleduje posledny spracovany subor
+  # premenna "date" zhromazduje datumy pre aktualny subor oddelene ciarkou
+  # prva podmienka if sa vykona pri zmene nazvu suboru (to znamena ze vsetky otvorenia suboru uz su zhromazdene do jedneho so vsektymi casmi)
+  # druha podmienka if sa vykona pri dosiahnuti posledneho riadku suboru
   echo "$FILTERED" | awk -F ';' '{print $6 ";" $1}' \
   | sort -df \
   | awk -F ';' '
@@ -146,11 +165,13 @@ secret_log(){
       END {if (last_file != "") print date}' \
   | sed 's/;$//' \
   | bzip2 -c > "$SL_PATH"/"$FILENAME".bz2
-
+  # sed 's/;$//' odstrani koncovu bodkociarku
+  # bzip2 -c ulozi data do suboru v adresari secret logu, ktory skomprimuje
 
 }
 
-
+# kontrola spravneho formatu datumu pomocou regulerneho vyrazu
+# pouzita vo funkcii filter_data
 check_date_format() {
   if ! echo "$1" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
     echo "Invalid date format"
