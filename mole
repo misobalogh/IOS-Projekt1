@@ -17,24 +17,37 @@ DATETIME=$($BINL/testdate +%Y-%m-%d_%H-%M-%S)
 
 #------functions section---------------------------------------------------------------
 
-
+# vypise help message
 print_help() {
+  echo ""
   echo "Usage: mole -h"
   echo "       mole [-g GROUP] FILE"
   echo "       mole [-m] [FILTERS] [DIRECTORY]"
   echo "       mole list [FILTERS] [DIRECTORY]"
   echo ""
   echo "Description:"
+  echo ""
   echo "  -h: Display this help message."
-  echo "  FILE: Open the specified file."
   echo "  -g GROUP: Assign the opened file to the specified group."
   echo "  -m: Select the most frequently opened file instead of the last opened one."
-  echo "  FILTERS: Apply filters to the list"
-  echo "  DIRECTORY: Select the directory to search in. If not specified, current directory will be used."
+  echo ""
   echo "  list: List the files that were opened with mole."
+  echo ""
+  echo "  FILE: Open the specified file."
+  echo "  FILTERS: Apply filters to the list"
+  echo "  DIRECTORY: Select the directory to search in. If not directory is not specified, current directory will be used."
+  echo ""
+  echo "FILTERS:"
+  echo "  -g GROUP1[,GROUP2[,...]] Only consider files whose execution falls within at least one of the specified groups."
+  echo "  -a DATE Only consider files opened or edited before this date. Format: YYYY-MM-DD."
+  echo "  -b DATE Only consider files opened or edited after this date. Format: YYYY-MM-DD."
+  echo ""
 }
 
-
+# vyberie nastaveny editor a otvori subor FILE
+# priortine ten, ktory je ulozeny v premennej EDITOR
+# ak EDITOR nie je nastaveny, otvori subor pomocou editora nastaveneho v premennej VISUAL
+# ak nie je nastavena ani premenna VISUAL, pouzije sa prikaz vi
 open_editor() {
   if [ "$EDITOR" ]; then
     "$EDITOR" "$FILE"
@@ -45,26 +58,22 @@ open_editor() {
   fi
 }
 
-getdir(){
-  if [ -z "$FILE" ]; then
-    DIR=$(basename "$(realpath .)")
-  else
-    DIR=$(basename "$(dirname "$(realpath "$FILE")")")
-  fi
-}
-
-
-
+# mole list [FILTERS] [DIRECTORY]
+# zobrazi zoznam suborov ktore vyhovuju aplikovanym filtrom
 list(){
-
+  # vyfiltruje data
   filter_data
-
+  # ak filtrom nevyhovuju ziadne subory, nevypise nic a ukonci program
   if [ -z "$FILTERED" ]; then
     exit 1
   fi
-
-  FILTERED=$(echo "$FILTERED" | awk -v dir="$DIR" -F ';' '{sub(/\/[^\/]*$/, "", $6); if ($6 == dir) print }')
   
+  # z dat ktore vyhovuju filtrom vyberie len tie, ktore su z daneho suboru
+  # z cesty ulozenej na $6 si pomocou prikazu sub(/\/[^\/]*$/, "", $6) vyberie len adresar a porovna ho z adresarom ktory bol zadany
+  # ak sa zhoduju, ulozi ho do filtrovanych dat
+  FILTERED=$(echo "$FILTERED" | awk -v dir="$DIR" -F ';' '{sub(/\/[^\/]*$/, "", $6); if ($6 == dir || $6"/" == dir) print }')
+
+  # zoradi najdene subory podla stlpca $5 (nazov suboru) a potom podla stlpca $3 (skupina), zoradi ich podla abecedy
   SORTED=$(echo "$FILTERED" | sort -dfu -k5 -k3)
 
   SORTED=$(echo "$SORTED" | awk '{ split($0, cols, " "); 
@@ -91,7 +100,16 @@ list(){
 }
 
 
-log_mole_rc(){
+getdir(){
+  if [ -z "$FILE" ]; then
+    DIR=$(basename "$(realpath .)")
+  else
+    DIR=$(basename "$(dirname "$(realpath "$FILE")")")
+  fi
+}
+
+
+log_mole_rc(){ 
   getdir
   if [ -z "$GROUP" ];then
     GROUP="-"
@@ -188,53 +206,62 @@ fi
 
 open_file() {
   
+  # zadane argumenty nevyhovovali ani jednemu suboru
   if [ -z "$FILE" ]; then
     echo ERROR: Could not find file with the specified criteria
     exit 1
   fi
   
-  open_editor $(basename "$FILE")
-  if [ $? -ne 0 ]; then
+  open_editor "$(basename "$FILE")"
+  # kontrola, ci sa editor neukoncil s chybovym hlasenim
+  exitcode=$?
+  if [ $exitcode -ne 0 ]; then
     echo ERROR: Could not open editor
     exit 1
   fi
+  # zapis editacie suboru 
   log_mole_rc
 }
 
 
 #------code section--------------------------------------------------------------------
 
-if [ -z "$(which realpath)" ]; then
+# kontrola ultility 'realpath'
+if ! command -v realpath >/dev/null; then
   echo "Error: command realpath not found"
   exit 1
 fi
 
 
+# kontrola nastavenia premmenej MOLE_RC
 if [ -z "$MOLE_RC" ]; then
   echo "Error: MOLE_RC is not set"
   exit 1
 fi
 
+# ak subor dany cestou MOLE_RC neexistuje, vytvori ho
 if [ ! -f "$MOLE_RC" ]; then
   mkdir -p "$(dirname "$MOLE_RC")"
   touch "$MOLE_RC"
 fi
 
-#DATE=$(date +%Y-%m-%d)
-#DATETIME=$($BINL/testdate)
-#DATETIME=$(date +%Y-%m-%d_%H-%M-%S)
+#--------------------------------------------------------------------------------------
 
+# Zaciatok parsovania argumentov
 
+# mole list
 if [ "$1" = "list" ]; then
   LIST="TRUE"
   shift
 fi
 
+# mole secret-log
 if [ "$1" = "secret-log" ]; then
   SECRETLOG="TRUE"
   shift
 fi
 
+# ziskanie vsetkych prepinacov (-h, -g, -m, -a, -b)
 while getopts ":hg:ma:b:" option; do
   case "$option" in
   h)      print_help; exit 0;;
@@ -251,10 +278,15 @@ done
 
 shift $((OPTIND-1))
 
+# Koniec parsovania argumentov 
 
+#--------------------------------------------------------------------------------------
+
+# funkcnost programu mole list
 if [ "$LIST" ]; then
   if [ $# -eq 0 ]; then
-    DIR=$(realpath .)
+    # pri nezadani priecinku, vyberie aktualny priecinok
+    DIR=$(realpath .)  
   else 
     DIR=$1
   fi
@@ -262,8 +294,10 @@ if [ "$LIST" ]; then
   exit 0
 fi
 
+# funkcnost programu mole secret-log
 if [ "$SECRETLOG" ]; then
-  while [ $# -ne 0 ]; do
+  # ziska vsetky postupne zadane priecinky
+  while [ $# -ne 0 ]; do 
     DIRECTORIES="$DIRECTORIES $1"
     shift
   done 
@@ -271,16 +305,21 @@ if [ "$SECRETLOG" ]; then
   exit 0
 fi
 
-
+# aplikuje na program zadane filtry
 filter_data
 
 if [ $# -eq 0 ]; then
+  # mole
+  # otvori subor z aktualneho adresara
   current_dir=$(realpath .)  
 else
-  ARGUMENT=$(realpath $1)
+  ARGUMENT=$(realpath "$1")
   if [ -d "$ARGUMENT" ]; then
+    # mole dir
+    # otvori subor z daneho adresara
     current_dir=$ARGUMENT
   else 
+    # mole file
     # otvori subor specifikovany argumentom, pripadne aj so zadanou skupinou ziskanou z filter_data
     FILE=$ARGUMENT
     open_file
@@ -291,19 +330,26 @@ fi
 
 
 # otvori v editore posledny editovany subor v tomto adresari
-# regulerny vyraz sub(/\/[^\/]*$/, "", $6) odstrani vsetko po poslednom '/' -> ziska cestu k suboru
-# ziskanu cestu porovna s aktualnym adresarom, ak je rovnaky -> otvori subor
-FILE=$(echo "$FILTERED" | awk -v current_dir="$current_dir" -F ';' '{rpath=$6; sub(/\/[^\/]*$/, "", $6); if ($6 == current_dir) {last_match=rpath}} END {print last_match}' )
+# data su uz vyfiltrovane aplikovanymi filtrami
+if [ "$MOST_USED" ]; then
+  # aplikovanie prepinaca -m
+  FILTERED=$(echo "$FILTERED" | awk -v current_dir="$current_dir" -F ';' '{rpath=$6; sub(/\/[^\/]*$/, "", $6); if ($6 == current_dir) print rpath}')
+  FILE=$(echo "$FILTERED" | sort | uniq -c | sort -rn | head -n 1 | awk '{print $2}' )
+else
+  # v $6 je ulozena 'realpath subor'
+  # regulerny vyraz sub(/\/[^\/]*$/, "", $6) odstrani vsetko po poslednom '/' -> ziska cestu k suboru
+  # ziskanu cestu porovna s aktualnym adresarom, ak je rovnaky, dosadi ho do last_match
+  # po prejdeni celeho suboru dosadi do premennej FILE poslednu zhodu (posledny otvoreny subor)
+  FILE=$(echo "$FILTERED" | awk -v current_dir="$current_dir" -F ';' '{rpath=$6; sub(/\/[^\/]*$/, "", $6); if ($6 == current_dir) {last_match=rpath}} END {print last_match}' )
+fi
 
-# ak sa nenajde ziadna zhoda, ukonci skript s errorom
+# ak sa nenajde ziadna zhoda, ukonci skript s chybovym hlasenim
 if [ -z "$FILE" ]; then
   echo "No files were edited with mole in this directory"
   exit 1
 fi
 
-#echo "$FILE"
+# otvori subor ktory vyhovuje aplikovanym filtrom
 open_file
 
 exit 0
-
-
