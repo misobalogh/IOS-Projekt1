@@ -5,14 +5,7 @@
 export POSIXLY_CORRECT=yes
 export LC_ALL=C
 
-# odstranit
-#export MOLE_RC="$HOME"/.config/molerc
-#EDITOR="nano"
-#VISUAL="code"
-
-DATETIME=$($BINL/testdate +%Y-%m-%d_%H-%M-%S)
-#DATETIME=$(date +%Y-%m-%d_%H-%M-%S)
-
+DATETIME=$(date +%Y-%m-%d_%H-%M-%S)
 
 
 #------functions section---------------------------------------------------------------
@@ -67,12 +60,12 @@ list(){
   if [ -z "$FILTERED" ]; then
     exit 1
   fi
-  
   # z dat ktore vyhovuju filtrom vyberie len tie, ktore su z daneho suboru
   # z cesty ulozenej na $6 si pomocou prikazu sub(/\/[^\/]*$/, "", $6) vyberie len adresar a porovna ho z adresarom ktory bol zadany
   # ak sa zhoduju, ulozi ho do filtrovanych dat
-  FILTERED=$(echo "$FILTERED" | awk -v dir="$DIR" -F ';' '{sub(/\/[^\/]*$/, "", $6); if ($6 == dir || $6"/" == dir) print }')
-
+  if [ -z "$RECURSIVE" ]; then
+    FILTERED=$(echo "$FILTERED" | awk -v dir="$DIR" -F ';' '{sub(/\/[^\/]*$/, "", $6); if ($6 == dir || $6"/" == dir) print }')
+  fi
   # zoradi najdene subory podla stlpca $5 (nazov suboru) a potom podla stlpca $3 (skupina), zoradi ich lexikograficky 
   # -dfu zoradenie podla abecedy, case-insensitive, unique
   SORTED=$(echo "$FILTERED" | sort -dfu -k5 -k3)
@@ -167,10 +160,9 @@ secret_log(){
   | bzip2 -c > "$SL_PATH"/"$FILENAME".bz2
   # sed 's/;$//' odstrani koncovu bodkociarku
   # bzip2 -c ulozi data do suboru v adresari secret logu, ktory skomprimuje
-
 }
 
-# kontrola spravneho formatu datumu pomocou regulerneho vyrazu
+# kontrola spravneho formatu datumu pomocou regulerneho vyrazu (4_cislice-2_cislice-2_cislice)
 # pouzita vo funkcii filter_data
 check_date_format() {
   if ! echo "$1" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
@@ -180,45 +172,60 @@ check_date_format() {
   fi
 }
 
-
+# aplikuje filtry na zaznamy v subore MOLE_RC
 filter_data(){
-  
+  # nacita obsah suboru MOLE_RC do premennej FILTERED
   FILTERED=$(cat "$MOLE_RC")
+  #volitelny prepinac -d, ak je nastaveny, bude vyhladavat editacie bez skupiny, takze v zanzmaoch oznacene '-'
+  if [ "$DEFAULT" ];then 
+    GROUP="-"
+  fi
+  # ak je GROUP nastavena a zaroven nie je skript spusteny s funkcionalitou secret-log, vyfiltruje zaznamy ktore obsahuju skupinu/skupiny GROUP
+  # rozdeli premennu GROUP skupiny ak ich je viac oddelenych ciarkov, a kazdu porovna so zaznamom v premennej FILTERED
   if [ "$GROUP" ] && [ -z "$SECRETLOG" ]; then
     FILTERED=$(echo "$FILTERED" | awk -F';' -v groups="$GROUP" '
       BEGIN {split(groups, arr, ",")}
       {for(i in arr) if($3 == arr[i]) {print; break}}')
   fi
-if [ "$SECRETLOG" ] && [ "$DIRECTORIES" ]; then
-  FILTERED=$(echo "$FILTERED" | awk -F';' -v OFS=';' -v dirs="$DIRECTORIES" '
-    BEGIN {split(dirs, arr, " ")}
-    {
-      rpath=$6
-      for (i=1; i<=NF; i++) {
-        sub(/\/[^\/]*$/, "", $i)
-      }
-    }
-    {
-      for (i in arr) {
-        for (j=1; j<=NF; j++) {
-          if ($j == arr[i]) {
-            print $1,$2,$3,$4,$5,rpath
-            break
-          }
+  # prepinac -r
+  if [ "$RECURSIVE" ]; then
+    FILTERED=$(echo "$FILTERED" | awk -v dir="$DIR" -F ';' '{sub(/\/[^\/]*$/, "", $6); if (index($6, dir) == 1) print}')
+  fi
+  # filter pre funkcionalitu secret-log [DIRECTORIES]
+  if [ "$SECRETLOG" ] && [ "$DIRECTORIES" ]; then
+    FILTERED=$(echo "$FILTERED" | awk -F';' -v OFS=';' -v dirs="$DIRECTORIES" '
+      BEGIN {split(dirs, arr, " ")}
+      {
+        rpath=$6
+        for (i=1; i<=NF; i++) {
+          sub(/\/[^\/]*$/, "", $i)
         }
       }
-    }'
-  )
-fi
+      {
+        for (i in arr) {
+          for (j=1; j<=NF; j++) {
+            if ($j == arr[i]) {
+              print $1,$2,$3,$4,$5,rpath
+              break
+            }
+          }
+        }
+      }'
+    )
+  fi
 
+  # prepinac -a
   if [ "$DATE_AFTER" ]; then
     check_date_format "$DATE_AFTER"
+    # rozdeli date_time na date a time, porovna date so zadanym datumom v premennej DATE_AFTER
     FILTERED=$(echo "$FILTERED" | awk -F';' -v date="$DATE_AFTER" '{split($1, dt, "_"); if (dt[1] > date) print}')
 
   fi
-
+  
+  # prepinac -b
   if [ "$DATE_BEFORE" ]; then
     check_date_format "$DATE_BEFORE"
+    # rozdeli date_time na date a time, porovna date so zadanym datumom v premennej DATE_BEFORE
     FILTERED=$(echo "$FILTERED" | awk -F';' -v date="$DATE_BEFORE" '{split($1, dt, "_"); if (dt[1] < date) print}')
   fi
 
@@ -227,7 +234,7 @@ fi
 
 open_file() {
   
-  # zadane argumenty nevyhovovali ani jednemu suboru
+  # ak zadane argumenty nevyhovovali ani jednemu suboru, skript sa ukonci s chybovym hlasenim
   if [ -z "$FILE" ]; then
     echo ERROR: Could not find file with the specified criteria
     exit 1
@@ -283,13 +290,15 @@ if [ "$1" = "secret-log" ]; then
 fi
 
 # ziskanie vsetkych prepinacov (-h, -g, -m, -a, -b)
-while getopts ":hg:ma:b:" option; do
+while getopts ":hg:ma:b:dr" option; do
   case "$option" in
   h)      print_help; exit 0;;
   g)      GROUP=$OPTARG;;
   m)      MOST_USED="TRUE";;
   a)      DATE_AFTER=$OPTARG;; #YYYY-MM-DD format 
   b)      DATE_BEFORE=$OPTARG;; #YYYY-MM-DD format
+  d)      DEFAULT="TRUE";; # volitelne rozsirenie -d
+  r)      RECURSIVE="TRUE";; # volitelne rozsirenie -r, obmedzenia: funguje len pre mole list
   :)      echo "Error: -$OPTARG requires an argument"; exit 1;;
   *)      echo "Invalid option: -$OPTARG" >&2
           echo "Try 'mole -h' for more information."
@@ -302,6 +311,12 @@ shift $((OPTIND-1))
 # Koniec parsovania argumentov 
 
 #--------------------------------------------------------------------------------------
+
+# -d a -g nemozu byt zadane sucastne, program vypise chybove hlasenie ak su zadane obidve
+if [ "$GROUP" ] && [ "$DEFAULT" ]; then
+  echo "Error: The -g and -d switches cannot be specified simultaneously. Please choose only one switch to use at a time."
+  exit 1
+fi
 
 # funkcnost programu mole list
 if [ "$LIST" ]; then
